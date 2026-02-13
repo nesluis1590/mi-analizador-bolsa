@@ -1,93 +1,89 @@
 import streamlit as st
 import yfinance as yf
 import pandas_ta as ta
+import pandas as pd
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 
-# Configuración de la página para móvil
-st.set_page_config(page_title="Scanner Pro AI", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Índices Master Scanner", layout="wide")
 
-st.title("📊 Mi Analizador de Bolsa v1.0")
-st.sidebar.header("Configuración")
+st.title("🏛️ Escáner de Índices Mayores")
+st.write("Análisis de sobrecompra/venta con Volumen (MFI) y RSI")
 
-# Selección de activos
-tickers_input = st.sidebar.text_input("Lista de Tickers (separados por coma)", "AAPL, NVDA, TSLA, BTC-USD, MSFT, AMD")
-tickers = [t.strip().upper() for t in tickers_input.split(",")]
+# 1. Listas de Tickers (Simplificadas para velocidad)
+indices = {
+    "NASDAQ 100 (Top)": ["AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "AVGO", "PEP", "COST"],
+    "S&P 500 (Top)": ["JPM", "V", "MA", "PG", "HD", "UNH", "LLY", "ABBV", "BAC", "XOM"]
+}
 
-periodo = st.sidebar.selectbox("Rango de tiempo", ["3mo", "6mo", "1y", "2y"], index=1)
+seleccion = st.sidebar.selectbox("Selecciona el Índice a escanear", list(indices.keys()))
+tickers = indices[seleccion]
 
-def analizar_activo(ticker):
-    df = yf.download(ticker, period=periodo, interval="1d", progress=False)
-    if df.empty: return None
-    
-    # Cálculos
-    df['RSI'] = ta.rsi(df['Close'], length=14)
-    df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
-    df['EMA50'] = ta.ema(df['Close'], length=50)
-    
-    return df
-
-# --- INTERFAZ PRINCIPAL ---
-tab1, tab2 = st.tabs(["🔍 Escáner Rápido", "📈 Gráfico Detallado"])
-
-with tab1:
-    st.subheader("Estado actual del mercado")
-    resumen = []
-    
-    import pandas as pd # Aseguramos que pandas esté disponible
-    
-    for t in tickers:
-        datos = analizar_activo(t)
+# 2. Función de descarga segura
+def obtener_datos(symbol):
+    try:
+        df = yf.download(symbol, period="6mo", interval="1d", progress=False)
+        if len(df) < 20: return None
         
-        if datos is not None and not datos.empty and len(datos) > 14:
-            try:
-                # Extraemos el último valor y lo forzamos a ser un número decimal (float)
-                rsi_val = float(datos['RSI'].iloc[-1])
-                mfi_val = float(datos['MFI'].iloc[-1])
-                precio = float(datos['Close'].iloc[-1])
-                
-                # Verificamos que no sean valores nulos (NaN)
-                if pd.isna(rsi_val) or pd.isna(mfi_val):
-                    estado = "Calculando..."
-                else:
-                    estado = "Neutral"
-                    if rsi_val < 35 and mfi_val < 35: 
-                        estado = "COMPRA (Sobreventa)"
-                    elif rsi_val > 65 and mfi_val > 65: 
-                        estado = "VENTA (Sobrecompra)"
-                
-                resumen.append({
-                    "Ticker": t, 
-                    "Precio": f"${precio:.2f}", 
-                    "RSI": round(rsi_val, 2), 
-                    "MFI Vol": round(mfi_val, 2), 
-                    "Señal": estado
-                })
-            except Exception as e:
-                # Si algo falla con un ticker, lo saltamos y seguimos con el siguiente
-                st.error(f"Error en {t}: {e}")
-                continue
-    
-    if resumen:
-        st.table(resumen)
-    else:
-        st.info("Escribe los Tickers en el menú lateral para empezar el escaneo.")
+        # Calculamos indicadores
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
+        return df
+    except:
+        return None
 
-with tab2:
-    target = st.selectbox("Selecciona activo para ver gráfico", tickers)
-    df_plot = analizar_activo(target)
+# 3. Proceso de Escaneo
+st.subheader(f"Analizando componentes de {seleccion}")
+resumen = []
+
+for t in tickers:
+    data = obtener_datos(t)
+    if data is not None:
+        # Extraemos valores asegurando que sean números puros
+        try:
+            ultimo_cierre = float(data['Close'].iloc[-1])
+            rsi_actual = float(data['RSI'].iloc[-1])
+            mfi_actual = float(data['MFI'].iloc[-1])
+            
+            # Lógica de señales
+            if rsi_actual < 30 and mfi_actual < 30:
+                señal = "🔥 SOBREVENTA (Compra)"
+            elif rsi_actual > 70 and mfi_actual > 70:
+                señal = "⚠️ SOBRECOMPRA (Venta)"
+            else:
+                señal = "Neutral"
+            
+            resumen.append({
+                "Activo": t,
+                "Precio": f"{ultimo_cierre:.2f}",
+                "RSI": round(rsi_actual, 1),
+                "MFI (Vol)": round(mfi_actual, 1),
+                "Señal": señal
+            })
+        except:
+            continue
+
+# 4. Mostrar Resultados
+if resumen:
+    df_final = pd.DataFrame(resumen)
     
-    if df_plot is not None:
-        # Crear gráfico con subplots (Precio + RSI/MFI abajo)
-        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-        
-        # Velas y EMA
-        fig.add_trace(go.Candlestick(x=df_plot.index, open=df_plot['Open'], high=df_plot['High'], low=df_plot['Low'], close=df_plot['Close'], name="Precio"), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['EMA50'], line=dict(color='yellow', width=1), name="EMA 50"), row=1, col=1)
-        
-        # RSI y MFI
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['RSI'], name="RSI", line=dict(color='cyan')), row=2, col=1)
-        fig.add_trace(go.Scatter(x=df_plot.index, y=df_plot['MFI'], name="MFI (Vol)", line=dict(color='magenta')), row=2, col=1)
-        
-        fig.update_layout(height=600, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False)
-        st.plotly_chart(fig, use_container_width=True)
+    # Aplicar color a las señales
+    def color_señal(val):
+        if 'Compra' in val: return 'background-color: #004d00'
+        if 'Venta' in val: return 'background-color: #4d0000'
+        return ''
+
+    st.table(df_final.style.applymap(color_señal, subset=['Señal']))
+else:
+    st.error("No se pudieron cargar los datos. Intenta refrescar la página.")
+
+# 5. Gráfico rápido del primero de la lista
+st.divider()
+st.subheader(f"Gráfico de Referencia: {tickers[0]}")
+df_graf = obtener_datos(tickers[0])
+if df_graf is not None:
+    fig = go.Figure(data=[go.Candlestick(x=df_graf.index,
+                open=df_graf['Open'], high=df_graf['High'],
+                low=df_graf['Low'], close=df_graf['Close'])])
+    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10))
+    st.plotly_chart(fig, use_container_width=True)
