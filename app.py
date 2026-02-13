@@ -1,8 +1,9 @@
 import streamlit as st
 import pandas as pd
 import pandas_ta as ta
+import yfinance as yf  # Nueva librería para Yahoo Finance
 import requests
-from requests.exceptions import RequestException, Timeout
+from requests.exceptions import RequestException
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
@@ -10,7 +11,6 @@ from datetime import datetime
 import pytz
 
 # --- 1. CONFIGURACIÓN ---
-API_KEY_ALPHA = "F7HHVS6BLMN7A0LE"
 TELEGRAM_TOKEN = "8216027796:AAGLDodiewu80muQFo1s0uDXl3tf5aiK5ew"  # Reemplaza con tu token real
 TELEGRAM_CHAT_ID = "841967788"       # Reemplaza con tu chat ID real
 
@@ -40,33 +40,21 @@ def obtener_datos_5min(symbol, max_retries=3):
     if symbol in cache_datos and (time.time() - cache_datos[symbol]['timestamp']) < 300:  # Cache de 5 minutos
         return cache_datos[symbol]['data']
     
-    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&apikey={API_KEY_ALPHA}&outputsize=compact'
-    
     for attempt in range(max_retries):
         try:
             st.write(f"🔄 Intentando obtener datos de {symbol} (intento {attempt+1})...")
-            r = requests.get(url, timeout=15).json()
+            # Descargar datos de Yahoo Finance: 1 día, intervalo 5m
+            df = yf.download(tickers=symbol, period="1d", interval="5m", prepost=True)  # prepost=True para datos fuera de horario
             
-            if "Error Message" in r:
-                st.error(f"❌ Error en API para {symbol}: {r['Error Message']}")
+            if df.empty:
+                st.error(f"❌ No se encontraron datos para {symbol}. Verifica el símbolo o la conexión.")
                 return None
             
-            if "Note" in r:
-                st.warning(f"⚠️ Límite de API alcanzado para {symbol}. Esperando 60 segundos...")
-                time.sleep(60)
-                continue
-            
-            key = "Time Series (5min)"
-            if key not in r:
-                st.error(f"❌ Datos no disponibles para {symbol}. Respuesta inesperada.")
-                return None
-            
-            df = pd.DataFrame.from_dict(r[key], orient='index')
-            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-            df = df.astype(float).iloc[::-1]
+            # Renombrar columnas para coincidir con el formato original
+            df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
             
             if len(df) < 50:  # Necesitamos al menos 50 filas para SMA50
-                st.warning(f"⚠️ Datos insuficientes para {symbol} (solo {len(df)} filas).")
+                st.warning(f"⚠️ Datos insuficientes para {symbol} (solo {len(df)} filas). Mercado cerrado o datos limitados.")
                 return None
             
             # Indicadores
@@ -83,8 +71,8 @@ def obtener_datos_5min(symbol, max_retries=3):
             cache_datos[symbol] = {'data': df, 'timestamp': time.time()}
             return df
         
-        except (RequestException, Timeout, ValueError) as e:
-            st.error(f"❌ Error de conexión para {symbol} (intento {attempt+1}): {e}")
+        except Exception as e:  # yfinance puede lanzar excepciones variadas
+            st.error(f"❌ Error al descargar datos para {symbol} (intento {attempt+1}): {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)  # Backoff exponencial
             else:
@@ -112,7 +100,7 @@ col1, col2 = st.columns(2)
 for i, (nombre, ticker) in enumerate(activos.items()):
     with [col1, col2][i]:
         if i > 0:
-            time.sleep(12)  # Delay para evitar límites de API (Alpha Vantage: ~5 llamadas/min)
+            time.sleep(2)  # Pequeño delay para evitar sobrecargar
         
         df = obtener_datos_5min(ticker)
         
