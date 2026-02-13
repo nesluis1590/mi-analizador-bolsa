@@ -9,7 +9,7 @@ import time
 st.set_page_config(page_title="Scanner de Entradas Pro", layout="wide")
 
 # CONFIGURACIÓN
-API_KEY = "O3WS2QJRIR0DDWLG" 
+API_KEY = "FZEZWV0VBR5BN4Y7" 
 activos = {"NASDAQ 100 (QQQ)": "QQQ", "S&P 500 (SPY)": "SPY"}
 
 st.title("🏛️ Sistema de Señales: NDX & SPX")
