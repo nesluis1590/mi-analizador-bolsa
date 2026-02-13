@@ -1,0 +1,22 @@
+name: Vigilante de Bolsa Venezuela
+on:
+  schedule:
+    # Se ejecuta cada 30 minutos (Horario UTC)
+    # 10am-12pm VET es aprox 14:00-16:00 UTC
+    - cron: '*/30 14-16 * * 1-5' 
+  workflow_dispatch: # Permite probarlo manualmente
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v2
+      - name: Instalar Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+      - name: Instalar librerías
+        run: pip install pandas pandas_ta requests pytz
+      - name: Ejecutar Bot
+        run: python bot_automatico.py
