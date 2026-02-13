@@ -3,87 +3,81 @@ import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
 import plotly.graph_objects as go
+from datetime import datetime
 
-# Configuración de la página
-st.set_page_config(page_title="Índices Master Scanner", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Nasdaq & SP500 Live", layout="wide")
 
-st.title("🏛️ Escáner de Índices Mayores")
-st.write("Análisis de sobrecompra/venta con Volumen (MFI) y RSI")
+# 1. ACTUALIZACIÓN AUTOMÁTICA (Cada 60 segundos)
+# Nota: Esto hará que la app se ejecute sola cada minuto
+from streamlit_autorefresh import st_autorefresh
+st_autorefresh(interval=60 * 1000, key="datarefresh")
 
-# 1. Listas de Tickers (Simplificadas para velocidad)
+st.title("🏛️ Escáner en Tiempo Real")
+st.write(f"Última actualización: {datetime.now().strftime('%H:%M:%S')}")
+
+# 2. SELECCIÓN DE ÍNDICES
 indices = {
     "NASDAQ 100 (Top)": ["AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "TSLA", "AVGO", "PEP", "COST"],
     "S&P 500 (Top)": ["JPM", "V", "MA", "PG", "HD", "UNH", "LLY", "ABBV", "BAC", "XOM"]
 }
 
-seleccion = st.sidebar.selectbox("Selecciona el Índice a escanear", list(indices.keys()))
+seleccion = st.sidebar.selectbox("Índice a escanear", list(indices.keys()))
 tickers = indices[seleccion]
 
-# 2. Función de descarga segura
+# 3. FUNCIÓN DE CÁLCULO
+@st.cache_data(ttl=60) # Guarda los datos por 60 seg para no saturar
 def obtener_datos(symbol):
-    try:
-        df = yf.download(symbol, period="6mo", interval="1d", progress=False)
-        if len(df) < 20: return None
-        
-        # Calculamos indicadores
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
-        return df
-    except:
-        return None
-
-# 3. Proceso de Escaneo
-st.subheader(f"Analizando componentes de {seleccion}")
-resumen = []
-
-for t in tickers:
-    data = obtener_datos(t)
-    if data is not None:
-        # Extraemos valores asegurando que sean números puros
-        try:
-            ultimo_cierre = float(data['Close'].iloc[-1])
-            rsi_actual = float(data['RSI'].iloc[-1])
-            mfi_actual = float(data['MFI'].iloc[-1])
-            
-            # Lógica de señales
-            if rsi_actual < 30 and mfi_actual < 30:
-                señal = "🔥 SOBREVENTA (Compra)"
-            elif rsi_actual > 70 and mfi_actual > 70:
-                señal = "⚠️ SOBRECOMPRA (Venta)"
-            else:
-                señal = "Neutral"
-            
-            resumen.append({
-                "Activo": t,
-                "Precio": f"{ultimo_cierre:.2f}",
-                "RSI": round(rsi_actual, 1),
-                "MFI (Vol)": round(mfi_actual, 1),
-                "Señal": señal
-            })
-        except:
-            continue
-
-# 4. Mostrar Resultados
-if resumen:
-    df_final = pd.DataFrame(resumen)
+    df = yf.download(symbol, period="1d", interval="1m", progress=False) # Intervalo de 1 minuto para "Tiempo Real"
+    hist = yf.download(symbol, period="1mo", interval="1d", progress=False) # Para indicadores diarios
+    if df.empty or hist.empty: return None
     
-    # Aplicar color a las señales
-    def color_señal(val):
-        if 'Compra' in val: return 'background-color: #004d00'
-        if 'Venta' in val: return 'background-color: #4d0000'
-        return ''
+    # Indicadores en el histórico diario
+    hist['RSI'] = ta.rsi(hist['Close'], length=14)
+    hist['MFI'] = ta.mfi(hist['High'], hist['Low'], hist['Close'], hist['Volume'], length=14)
+    
+    return {"actual": df, "indicadores": hist}
 
-    st.table(df_final.style.applymap(color_señal, subset=['Señal']))
-else:
-    st.error("No se pudieron cargar los datos. Intenta refrescar la página.")
+# 4. TABLA DE MONITOREO
+resumen = []
+for t in tickers:
+    data_dict = obtener_datos(t)
+    if data_dict:
+        precio_actual = data_dict["actual"]['Close'].iloc[-1]
+        rsi_val = data_dict["indicadores"]['RSI'].iloc[-1]
+        mfi_val = data_dict["indicadores"]['MFI'].iloc[-1]
+        
+        estado = "Neutral"
+        if rsi_val < 35: estado = "🟢 SOBREVENTA"
+        elif rsi_val > 65: estado = "🔴 SOBRECOMPRA"
+        
+        resumen.append({
+            "Activo": t,
+            "Precio": f"${precio_actual:.2f}",
+            "RSI": round(rsi_val, 1),
+            "MFI": round(mfi_val, 1),
+            "Señal": estado
+        })
 
-# 5. Gráfico rápido del primero de la lista
+st.table(pd.DataFrame(resumen))
+
+# 5. GRÁFICO INTERACTIVO DE VELAS (1 MINUTO)
 st.divider()
-st.subheader(f"Gráfico de Referencia: {tickers[0]}")
-df_graf = obtener_datos(tickers[0])
-if df_graf is not None:
-    fig = go.Figure(data=[go.Candlestick(x=df_graf.index,
-                open=df_graf['Open'], high=df_graf['High'],
-                low=df_graf['Low'], close=df_graf['Close'])])
-    fig.update_layout(template="plotly_dark", height=400, margin=dict(l=10, r=10, t=10, b=10))
+target = st.selectbox("Ver gráfico detallado (1 min):", tickers)
+data_graf = obtener_datos(target)
+
+if data_graf:
+    df_m = data_graf["actual"]
+    fig = go.Figure(data=[go.Candlestick(
+        x=df_m.index, open=df_m['Open'], high=df_m['High'],
+        low=df_m['Low'], close=df_m['Close'], name="1 min"
+    )])
+    
+    fig.update_layout(
+        title=f"Gráfico Intradía: {target}",
+        template="plotly_dark",
+        height=500,
+        xaxis_rangeslider_visible=False,
+        margin=dict(l=10, r=10, t=40, b=10)
+    )
     st.plotly_chart(fig, use_container_width=True)
