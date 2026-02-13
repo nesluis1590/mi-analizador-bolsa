@@ -22,15 +22,19 @@ def enviar_telegram(mensaje):
         st.error("Error al enviar a Telegram. Revisa el Token/ID.")
 
 def obtener_datos(symbol):
-    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={API_KEY_ALPHA}&outputsize=compact'
+    # Cambiamos a INTRADAY y añadimos interval=5min
+    url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&apikey={API_KEY_ALPHA}&outputsize=compact'
     try:
         r = requests.get(url).json()
-        if "Time Series (Daily)" not in r: return None
-        df = pd.DataFrame.from_dict(r["Time Series (Daily)"], orient='index')
+        # Alpha Vantage usa una clave diferente para intradía
+        key = "Time Series (5min)"
+        if key not in r: return None
+        
+        df = pd.DataFrame.from_dict(r[key], orient='index')
         df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
         df = df.astype(float).iloc[::-1]
         
-        # Indicadores Profesionales
+        # Indicadores (se calculan sobre velas de 5 min)
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
         df['SMA50'] = ta.sma(df['Close'], length=50)
