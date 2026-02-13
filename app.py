@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import pandas_ta as ta
 import requests
+from requests.exceptions import RequestException, Timeout
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import time
@@ -10,8 +11,8 @@ import pytz
 
 # --- 1. CONFIGURACIÓN ---
 API_KEY_ALPHA = "F7HHVS6BLMN7A0LE"
-TELEGRAM_TOKEN = "TU_TELEGRAM_TOKEN_AQUI"
-TELEGRAM_CHAT_ID = "TU_CHAT_ID_AQUI"
+TELEGRAM_TOKEN = "8216027796:AAGLDodiewu80muQFo1s0uDXl3tf5aiK5ew"  # Reemplaza con tu token real
+TELEGRAM_CHAT_ID = "841967788"       # Reemplaza con tu chat ID real
 
 st.set_page_config(page_title="Scalper Pro 5m - VET", layout="wide")
 
@@ -19,38 +20,78 @@ st.set_page_config(page_title="Scalper Pro 5m - VET", layout="wide")
 venezuela_tz = pytz.timezone('America/Caracas')
 hora_actual = datetime.now(venezuela_tz).strftime('%H:%M:%S')
 
+# Cache simple para evitar llamadas repetidas (en memoria)
+cache_datos = {}
+
 # --- 2. FUNCIONES ---
 def enviar_telegram(mensaje):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        st.warning("⚠️ Telegram no configurado. Revisa el token y chat ID.")
+        return
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": mensaje, "parse_mode": "Markdown"})
-    except:
-        pass
+        response = requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": mensaje, "parse_mode": "Markdown"}, timeout=10)
+        if response.status_code != 200:
+            st.error(f"Error al enviar Telegram: {response.text}")
+    except RequestException as e:
+        st.error(f"Error de conexión con Telegram: {e}")
 
-def obtener_datos_5min(symbol):
-    # Forzamos la descarga sin importar la hora del sistema
+def obtener_datos_5min(symbol, max_retries=3):
+    if symbol in cache_datos and (time.time() - cache_datos[symbol]['timestamp']) < 300:  # Cache de 5 minutos
+        return cache_datos[symbol]['data']
+    
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&apikey={API_KEY_ALPHA}&outputsize=compact'
-    try:
-        r = requests.get(url).json()
-        key = "Time Series (5min)"
-        
-        if key not in r:
+    
+    for attempt in range(max_retries):
+        try:
+            st.write(f"🔄 Intentando obtener datos de {symbol} (intento {attempt+1})...")
+            r = requests.get(url, timeout=15).json()
+            
+            if "Error Message" in r:
+                st.error(f"❌ Error en API para {symbol}: {r['Error Message']}")
+                return None
+            
             if "Note" in r:
-                st.warning(f"⚠️ Límite de API. Espera un momento...")
-            return None
+                st.warning(f"⚠️ Límite de API alcanzado para {symbol}. Esperando 60 segundos...")
+                time.sleep(60)
+                continue
+            
+            key = "Time Series (5min)"
+            if key not in r:
+                st.error(f"❌ Datos no disponibles para {symbol}. Respuesta inesperada.")
+                return None
+            
+            df = pd.DataFrame.from_dict(r[key], orient='index')
+            df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+            df = df.astype(float).iloc[::-1]
+            
+            if len(df) < 50:  # Necesitamos al menos 50 filas para SMA50
+                st.warning(f"⚠️ Datos insuficientes para {symbol} (solo {len(df)} filas).")
+                return None
+            
+            # Indicadores
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
+            df['SMA50'] = ta.sma(df['Close'], length=50)
+            
+            df = df.dropna()
+            if df.empty:
+                st.warning(f"⚠️ No hay datos válidos después de calcular indicadores para {symbol}.")
+                return None
+            
+            # Guardar en cache
+            cache_datos[symbol] = {'data': df, 'timestamp': time.time()}
+            return df
         
-        df = pd.DataFrame.from_dict(r[key], orient='index')
-        df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        df = df.astype(float).iloc[::-1]
-        
-        # Indicadores
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
-        df['SMA50'] = ta.sma(df['Close'], length=50)
-        
-        return df.dropna()
-    except:
-        return None
+        except (RequestException, Timeout, ValueError) as e:
+            st.error(f"❌ Error de conexión para {symbol} (intento {attempt+1}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)  # Backoff exponencial
+            else:
+                enviar_telegram(f"❌ Falló la obtención de datos para {symbol} después de {max_retries} intentos.")
+                return None
+    
+    return None
 
 # --- 3. INTERFAZ ---
 st.title("🚀 Scalper Pro 5m: NDX & SPX")
@@ -70,14 +111,16 @@ col1, col2 = st.columns(2)
 
 for i, (nombre, ticker) in enumerate(activos.items()):
     with [col1, col2][i]:
-        if i > 0: time.sleep(2) 
+        if i > 0:
+            time.sleep(12)  # Delay para evitar límites de API (Alpha Vantage: ~5 llamadas/min)
         
         df = obtener_datos_5min(ticker)
         
         if df is not None and not df.empty:
             val = df.iloc[-1]
             precio, rsi, mfi, sma50 = val['Close'], val['RSI'], val['MFI'], val['SMA50']
-            tendencia = "📈 ALCISTA" if precio > sma50 else "📉 BAJISTA"
+            margen_tendencia = 0.001  # 0.1% margen para evitar ruido
+            tendencia = "📈 ALCISTA" if precio > sma50 * (1 + margen_tendencia) else "📉 BAJISTA" if precio < sma50 * (1 - margen_tendencia) else "➡️ LATERAL"
 
             st.subheader(f"{nombre}")
             m1, m2, m3 = st.columns(3)
@@ -85,15 +128,15 @@ for i, (nombre, ticker) in enumerate(activos.items()):
             m2.metric("Tendencia", tendencia)
             m3.metric("RSI", f"{rsi:.1f}")
 
-            # Lógica de Alerta
-            if rsi < 35 and mfi < 35:
+            # Lógica de Alerta mejorada
+            if rsi < 35 and mfi < 35 and precio > sma50 * (1 + margen_tendencia):
                 st.success("🟢 SEÑAL DE COMPRA")
                 if st.button(f"Notificar Compra {ticker}"):
-                    enviar_telegram(f"🟢 *COMPRA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}")
-            elif rsi > 65 and mfi > 65:
+                    enviar_telegram(f"🟢 *COMPRA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}\nRSI: {rsi:.1f}, MFI: {mfi:.1f}")
+            elif rsi > 65 and mfi > 65 and precio < sma50 * (1 - margen_tendencia):
                 st.error("🔴 SEÑAL DE VENTA")
                 if st.button(f"Notificar Venta {ticker}"):
-                    enviar_telegram(f"🔴 *VENTA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}")
+                    enviar_telegram(f"🔴 *VENTA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}\nRSI: {rsi:.1f}, MFI: {mfi:.1f}")
 
             # --- GRÁFICO ---
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
@@ -104,4 +147,4 @@ for i, (nombre, ticker) in enumerate(activos.items()):
             fig.update_layout(height=450, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info(f"⏳ Buscando datos de {ticker} en el servidor...")
+            st.info(f"⏳ No se pudieron obtener datos de {ticker}. Revisa la conexión o intenta más tarde.")
