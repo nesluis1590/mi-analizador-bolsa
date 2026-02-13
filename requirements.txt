@@ -1,4 +1,5 @@
-yfinance
-pandas_ta
 streamlit
+pandas
+pandas_ta
+requests
 plotly
