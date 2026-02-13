@@ -2,4 +2,3 @@ yfinance
 pandas_ta
 streamlit
 plotly
-streamlit-autorefresh
