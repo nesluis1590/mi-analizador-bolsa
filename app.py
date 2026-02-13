@@ -7,7 +7,7 @@ from plotly.subplots import make_subplots
 import time
 
 # --- 1. CONFIGURACIÓN ---
-API_KEY_ALPHA = "5D3KE1ZCPW9RG2NB"
+API_KEY_ALPHA = "Y5Q184UDJBEMJ5F4"
 TELEGRAM_TOKEN = "8216027796:AAGLDodiewu80muQFo1s0uDXl3tf5aiK5ew"
 TELEGRAM_CHAT_ID = "841967788"
 
@@ -25,41 +25,33 @@ def obtener_datos_5min(symbol):
     url = f'https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol={symbol}&interval=5min&apikey={API_KEY_ALPHA}&outputsize=compact'
     try:
         r = requests.get(url).json()
-        
-        # Validación de respuesta
         key = "Time Series (5min)"
         if key not in r:
-            if "Note" in r: 
-                st.warning(f"⏸️ Límite de API alcanzado para {symbol}. Reintentando en automático...")
             return None
         
-        # Creación de DataFrame
         df = pd.DataFrame.from_dict(r[key], orient='index')
         df.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
         df = df.astype(float).iloc[::-1]
         
-        # Indicadores Técnicos
+        # Indicadores
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
         df['SMA50'] = ta.sma(df['Close'], length=50)
         
-        # CORRECCIÓN: Eliminar filas con valores nulos (SMA50 necesita 50 velas previas)
-        df = df.dropna()
-        return df
-    except Exception as e:
-        st.error(f"Error de conexión: {e}")
+        return df.dropna()
+    except:
         return None
 
 # --- 3. INTERFAZ ---
 st.title("🚀 Scalper Pro 5m: NDX & SPX")
-st.markdown(f"**Estado:** Conectado | **Horario Local:** {time.strftime('%H:%M')} VET")
+st.write(f"Sincronizado | Hora VET: {time.strftime('%H:%M')}")
 
 activos = {"NASDAQ 100": "QQQ", "S&P 500": "SPY"}
 col1, col2 = st.columns(2)
 
 for i, (nombre, ticker) in enumerate(activos.items()):
     with [col1, col2][i]:
-        if i > 0: time.sleep(1) 
+        if i > 0: time.sleep(2) 
         
         df = obtener_datos_5min(ticker)
         
@@ -75,18 +67,28 @@ for i, (nombre, ticker) in enumerate(activos.items()):
             m3.metric("RSI", f"{rsi:.1f}")
 
             # Lógica de Alerta
-            mensaje_alerta = ""
             if rsi < 35 and mfi < 35:
                 st.success("🟢 SEÑAL DE COMPRA")
-                mensaje_alerta = f"🟢 *SCALP COMPRA* en {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}"
+                if st.button(f"Notificar Compra {ticker}"):
+                    enviar_telegram(f"🟢 *COMPRA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}")
             elif rsi > 65 and mfi > 65:
                 st.error("🔴 SEÑAL DE VENTA")
-                mensaje_alerta = f"🔴 *SCALP VENTA* en {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}"
+                if st.button(f"Notificar Venta {ticker}"):
+                    enviar_telegram(f"🔴 *VENTA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}")
 
-            if mensaje_alerta != "" and st.button(f"Notificar {ticker}"):
-                enviar_telegram(mensaje_alerta)
-                st.toast("Enviado!")
-
-            # Gráfico Robusto
+            # --- GRÁFICO (CORREGIDO) ---
             fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Velas"), row=1,
+            
+            # Línea de Velas
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Velas"), row=1, col=1)
+            
+            # Línea de Tendencia
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='orange', width=2), name="SMA 50"), row=1, col=1)
+            
+            # RSI
+            fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='cyan'), name="RSI"), row=2, col=1)
+            
+            fig.update_layout(height=450, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info(f"⏳ Esperando apertura de mercado para {ticker}...")
