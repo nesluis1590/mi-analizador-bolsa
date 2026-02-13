@@ -9,7 +9,7 @@ import time
 # --- CONFIGURACIÓN DE IDENTIDAD ---
 API_KEY_ALPHA = "FZEZWV0VBR5BN4Y7"
 TELEGRAM_TOKEN = "8216027796:AAGLDodiewu80muQFo1s0uDXl3tf5aiK5ew"
-TELEGRAM_CHAT_ID = "ID: 841967788"
+TELEGRAM_CHAT_ID = "841967788"
 
 st.set_page_config(page_title="Scanner Pro Elite", layout="wide")
 
