@@ -33,22 +33,45 @@ tab1, tab2 = st.tabs(["🔍 Escáner Rápido", "📈 Gráfico Detallado"])
 with tab1:
     st.subheader("Estado actual del mercado")
     resumen = []
+    
+    import pandas as pd # Aseguramos que pandas esté disponible
+    
     for t in tickers:
         datos = analizar_activo(t)
-        if datos is not None:
-            rsi_val = datos['RSI'].iloc[-1]
-            mfi_val = datos['MFI'].iloc[-1]
-            precio = datos['Close'].iloc[-1]
-            
-            # Lógica de colores/estado
-            estado = "Neutral"
-            if rsi_val < 35 and mfi_val < 35: estado = "COMPRA (Sobreventa)"
-            elif rsi_val > 65 and mfi_val > 65: estado = "VENTA (Sobrecompra)"
-            
-            resumen.append({"Ticker": t, "Precio": f"${precio:.2f}", "RSI": round(rsi_val, 2), "MFI Vol": round(mfi_val, 2), "Señal": estado})
+        
+        if datos is not None and not datos.empty and len(datos) > 14:
+            try:
+                # Extraemos el último valor y lo forzamos a ser un número decimal (float)
+                rsi_val = float(datos['RSI'].iloc[-1])
+                mfi_val = float(datos['MFI'].iloc[-1])
+                precio = float(datos['Close'].iloc[-1])
+                
+                # Verificamos que no sean valores nulos (NaN)
+                if pd.isna(rsi_val) or pd.isna(mfi_val):
+                    estado = "Calculando..."
+                else:
+                    estado = "Neutral"
+                    if rsi_val < 35 and mfi_val < 35: 
+                        estado = "COMPRA (Sobreventa)"
+                    elif rsi_val > 65 and mfi_val > 65: 
+                        estado = "VENTA (Sobrecompra)"
+                
+                resumen.append({
+                    "Ticker": t, 
+                    "Precio": f"${precio:.2f}", 
+                    "RSI": round(rsi_val, 2), 
+                    "MFI Vol": round(mfi_val, 2), 
+                    "Señal": estado
+                })
+            except Exception as e:
+                # Si algo falla con un ticker, lo saltamos y seguimos con el siguiente
+                st.error(f"Error en {t}: {e}")
+                continue
     
-    st.table(resumen)
-
+    if resumen:
+        st.table(resumen)
+    else:
+        st.info("Escribe los Tickers en el menú lateral para empezar el escaneo.")
 
 with tab2:
     target = st.selectbox("Selecciona activo para ver gráfico", tickers)
