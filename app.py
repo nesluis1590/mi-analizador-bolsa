@@ -49,6 +49,7 @@ with tab1:
     
     st.table(resumen)
 
+
 with tab2:
     target = st.selectbox("Selecciona activo para ver gráfico", tickers)
     df_plot = analizar_activo(target)
