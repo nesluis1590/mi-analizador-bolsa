@@ -10,9 +10,9 @@ import pytz
 
 # --- CONFIGURACIÓN SEGURA ---
 # Nota: En la nube, es mejor usar st.secrets, pero por ahora pongamos las keys directo
-API_KEY_ALPHA = "TU_API_KEY"
+API_KEY_ALPHA = "LZT7313XII5Y9DJ5"
 TELEGRAM_TOKEN = "TU_TOKEN"
-TELEGRAM_CHAT_ID = "TU_CHAT_ID"
+TELEGRAM_CHAT_ID = "841967788"
 
 st.set_page_config(page_title="Cloud Scalper VET", layout="wide")
 
