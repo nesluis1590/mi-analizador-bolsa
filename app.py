@@ -8,86 +8,58 @@ import time
 from datetime import datetime
 import pytz
 
-# --- CONFIGURACIÓN ---
-TELEGRAM_TOKEN = "8216027796:AAGLDodiewu80muQFo1s0uDXl3tf5aiK5ew"
-TELEGRAM_CHAT_ID = "841967788"
+st.set_page_config(page_title="Crypto Scalper 24/7", layout="wide")
 
-st.set_page_config(page_title="Scalper Pro VET - yfinance", layout="wide")
-
-# Función para enviar a Telegram
-def enviar_telegram(mensaje):
+def obtener_datos_crypto(ticker):
     try:
-        import requests
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": mensaje, "parse_mode": "Markdown"})
-    except:
-        pass
-
-# --- FUNCIÓN DE DATOS (MÁS RÁPIDA) ---
-def obtener_datos_yf(ticker):
-    try:
-        # Descargamos 2 días de datos con velas de 5 minutos
-        df = yf.download(ticker, period="5d", interval="60min", progress=False)
-        if df.empty: return None
+        # Para Cripto, bajamos los últimos 2 días con velas de 5 min
+        df = yf.download(ticker, period="2d", interval="5min", progress=False)
         
-        # Ajuste de columnas para yfinance
-        df = df.copy()
+        if df.empty:
+            return None
         
-        # Indicadores Técnicos
+        # LIMPIEZA DE COLUMNAS (Importante para yfinance en Cripto)
+        df.columns = [col[0] if isinstance(col, tuple) else col for col in df.columns]
+        
+        # Indicadores
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['MFI'] = ta.mfi(df['High'], df['Low'], df['Close'], df['Volume'], length=14)
         df['SMA50'] = ta.sma(df['Close'], length=50)
         
         return df.dropna()
     except Exception as e:
-        st.error(f"Error en {ticker}: {e}")
+        st.error(f"Error técnico: {e}")
         return None
 
 # --- INTERFAZ ---
 tz = pytz.timezone('America/Caracas')
-st.title("🚀 Scalper Pro 5m (Online)")
-st.write(f"📍 **Hora Caracas:** {datetime.now(tz).strftime('%I:%M:%S %p')}")
+st.title("₿ Scalper Cripto 24/7 (En Vivo)")
+st.write(f"📍 **Hora VET:** {datetime.now(tz).strftime('%I:%M:%S %p')}")
 
+# CAMBIAMOS A CRIPTO PARA PROBAR AHORA QUE LA BOLSA CERRÓ
 activos = {"Bitcoin": "BTC-USD", "Ethereum": "ETH-USD"}
 col1, col2 = st.columns(2)
 
 for i, (nombre, ticker) in enumerate(activos.items()):
     with [col1, col2][i]:
-        df = obtener_datos_yf(ticker)
+        df = obtener_datos_crypto(ticker)
         
         if df is not None and not df.empty:
             ultimo = df.iloc[-1]
             precio = float(ultimo['Close'])
             rsi = float(ultimo['RSI'])
-            mfi = float(ultimo['MFI'])
-            sma50 = float(ultimo['SMA50'])
             
-            tendencia = "📈 ALCISTA" if precio > sma50 else "📉 BAJISTA"
-            color_t = "green" if precio > sma50 else "red"
-
             st.subheader(f"{nombre}")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Precio", f"${precio:.2f}")
-            m2.metric("Tendencia", tendencia)
-            m3.metric("RSI", f"{rsi:.1f}")
+            st.metric("Precio Actual", f"${precio:,.2f}")
+            st.metric("RSI (5m)", f"{rsi:.1f}")
 
-            # Lógica de Alerta
-            if rsi < 35 and mfi < 35:
-                st.success("🟢 OPORTUNIDAD DE COMPRA")
-                if st.button(f"Alertar Compra {ticker}"):
-                    enviar_telegram(f"🟢 *COMPRA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}")
-            elif rsi > 65 and mfi > 65:
-                st.error("🔴 OPORTUNIDAD DE VENTA")
-                if st.button(f"Alertar Venta {ticker}"):
-                    enviar_telegram(f"🔴 *VENTA* {nombre}\nPrecio: ${precio:.2f}\nTendencia: {tendencia}")
-
-            # Gráfico Plotly
-            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.03)
-            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Velas"), row=1, col=1)
-            fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='orange', width=2), name="SMA50"), row=1, col=1)
+            # Gráfico
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3])
+            fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Precio"), row=1, col=1)
+            fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='orange'), name="SMA50"), row=1, col=1)
             fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='cyan'), name="RSI"), row=2, col=1)
             
-            fig.update_layout(height=400, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False, margin=dict(l=0,r=0,t=0,b=0))
+            fig.update_layout(height=450, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info(f"Esperando datos de {nombre}...")
+            st.warning(f"Buscando señal de {nombre}...")
