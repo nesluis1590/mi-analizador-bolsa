@@ -11,47 +11,49 @@ st.set_page_config(page_title="Scalper Pro Binance", layout="wide")
 
 def obtener_datos_binance(symbol):
     try:
-        # Traemos las últimas 100 velas de 5 minutos
+        # Forzamos el símbolo a MAYÚSCULAS para evitar el error de Binance
+        symbol = symbol.upper()
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=100"
         res = requests.get(url).json()
         
-        # Estructura de Binance: [Tiempo, Open, High, Low, Close, Volume, ...]
+        # Si Binance devuelve un error (ej: símbolo no encontrado)
+        if isinstance(res, dict) and "code" in res:
+            return None
+            
         df = pd.DataFrame(res, columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'CloseTime', 'QuoteAssetVolume', 'Trades', 'TakerBuyBase', 'TakerBuyQuote', 'Ignore'])
         
-        # Convertir a formato numérico
         df['Time'] = pd.to_datetime(df['Time'], unit='ms')
         for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
             df[col] = df[col].astype(float)
             
         df.set_index('Time', inplace=True)
-
-        # Indicadores
         df['RSI'] = ta.rsi(df['Close'], length=14)
         df['SMA50'] = ta.sma(df['Close'], length=50)
         
         return df.dropna()
-    except Exception as e:
+    except:
         return None
 
 # --- INTERFAZ ---
 tz = pytz.timezone('America/Caracas')
-st.title("⚡ Scalper Pro: Conexión Directa Binance")
-st.write(f"Sincronizado con Caracas: {datetime.now(tz).strftime('%I:%M %p')}")
+st.title("⚡ Monitor en Vivo (Binance API)")
+st.write(f"Sincronizado con Caracas: {datetime.now(tz).strftime('%I:%M:%S %p')}")
 
-# Símbolos en formato Binance (BTCUSDT es Bitcoin vs Dólar)
+# ASEGÚRATE DE QUE ESTÉN EN MAYÚSCULAS Y TERMINEN EN USDT
 activos = {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}
 
 for nombre, ticker in activos.items():
-    st.subheader(f"📊 {nombre} (5 min)")
     df = obtener_datos_binance(ticker)
     
-    if df is not None:
+    # VALIDACIÓN: Solo intentamos leer datos si el DataFrame NO está vacío
+    if df is not None and len(df) > 0:
         val = df.iloc[-1]
         precio, rsi, sma50 = val['Close'], val['RSI'], val['SMA50']
         
+        st.subheader(f"📊 {nombre}")
         c1, c2, c3 = st.columns(3)
         c1.metric("Precio", f"${precio:,.2f}")
-        c2.metric("RSI (14)", f"{rsi:.2f}")
+        c2.metric("RSI (5m)", f"{rsi:.2f}")
         c3.metric("Tendencia", "📈 ALCISTA" if precio > sma50 else "📉 BAJISTA")
 
         # Gráfico
@@ -63,4 +65,4 @@ for nombre, ticker in activos.items():
         fig.update_layout(height=450, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error(f"⚠️ No se pudo conectar con Binance para {nombre}")
+        st.error(f"⚠️ No hay datos para {ticker}. Verifica que el nombre sea correcto (ej: BTCUSDT).")
