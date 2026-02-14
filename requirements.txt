@@ -1,6 +1,5 @@
-streamlit
+requests
 pandas
 pandas_ta
-yfinance==0.2.40
 plotly
 pytz
