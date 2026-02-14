@@ -11,27 +11,35 @@ st.set_page_config(page_title="Scalper Pro Binance", layout="wide")
 
 def obtener_datos_binance(symbol):
     try:
-        # Forzamos el símbolo a MAYÚSCULAS para evitar el error de Binance
         symbol = symbol.upper()
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=100"
-        res = requests.get(url).json()
         
-        # Si Binance devuelve un error (ej: símbolo no encontrado)
-        if isinstance(res, dict) and "code" in res:
+        # Agregamos "headers" para simular un navegador real
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        res = response.json()
+        
+        if isinstance(res, list) and len(res) > 0:
+            df = pd.DataFrame(res, columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'CloseTime', 'QuoteAssetVolume', 'Trades', 'TakerBuyBase', 'TakerBuyQuote', 'Ignore'])
+            
+            df['Time'] = pd.to_datetime(df['Time'], unit='ms')
+            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
+                df[col] = df[col].astype(float)
+                
+            df.set_index('Time', inplace=True)
+            df['RSI'] = ta.rsi(df['Close'], length=14)
+            df['SMA50'] = ta.sma(df['Close'], length=50)
+            
+            return df.dropna()
+        else:
+            # Si hay error, lo mostramos en la consola de la app para saber qué es
+            st.sidebar.error(f"Error de API en {symbol}: {res}")
             return None
-            
-        df = pd.DataFrame(res, columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'CloseTime', 'QuoteAssetVolume', 'Trades', 'TakerBuyBase', 'TakerBuyQuote', 'Ignore'])
-        
-        df['Time'] = pd.to_datetime(df['Time'], unit='ms')
-        for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-            df[col] = df[col].astype(float)
-            
-        df.set_index('Time', inplace=True)
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['SMA50'] = ta.sma(df['Close'], length=50)
-        
-        return df.dropna()
-    except:
+    except Exception as e:
+        st.sidebar.error(f"Fallo de conexión: {e}")
         return None
 
 # --- INTERFAZ ---
