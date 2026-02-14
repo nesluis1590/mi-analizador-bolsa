@@ -27,7 +27,7 @@ def enviar_telegram(mensaje):
 def obtener_datos_yf(ticker):
     try:
         # Descargamos 2 días de datos con velas de 5 minutos
-        df = yf.download(ticker, period="2d", interval="5min", progress=False)
+        df = yf.download(ticker, period="5d", interval="60min", progress=False)
         if df.empty: return None
         
         # Ajuste de columnas para yfinance
@@ -48,7 +48,7 @@ tz = pytz.timezone('America/Caracas')
 st.title("🚀 Scalper Pro 5m (Online)")
 st.write(f"📍 **Hora Caracas:** {datetime.now(tz).strftime('%I:%M:%S %p')}")
 
-activos = {"NASDAQ 100": "QQQ", "S&P 500": "SPY"}
+activos = {"Bitcoin": "BTC-USD", "Ethereum": "ETH-USD"}
 col1, col2 = st.columns(2)
 
 for i, (nombre, ticker) in enumerate(activos.items()):
