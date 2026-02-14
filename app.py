@@ -1,76 +1,76 @@
 import streamlit as st
 import pandas as pd
 import pandas_ta as ta
-import requests
+import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import pytz
 
-st.set_page_config(page_title="Scalper Pro Binance", layout="wide")
+st.set_page_config(page_title="Scalper Pro Universal", layout="wide")
 
-def obtener_datos_binance(symbol):
+def obtener_datos_seguros(ticker):
     try:
-        symbol = symbol.upper()
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=100"
+        # Descargamos los últimos 2 días con velas de 5 min
+        # Usamos period="2d" para asegurar que siempre haya datos aunque sea fin de semana
+        df = yf.download(ticker, period="2d", interval="5min", progress=False)
         
-        # Agregamos "headers" para simular un navegador real
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        res = response.json()
-        
-        if isinstance(res, list) and len(res) > 0:
-            df = pd.DataFrame(res, columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume', 'CloseTime', 'QuoteAssetVolume', 'Trades', 'TakerBuyBase', 'TakerBuyQuote', 'Ignore'])
-            
-            df['Time'] = pd.to_datetime(df['Time'], unit='ms')
-            for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
-                df[col] = df[col].astype(float)
-                
-            df.set_index('Time', inplace=True)
-            df['RSI'] = ta.rsi(df['Close'], length=14)
-            df['SMA50'] = ta.sma(df['Close'], length=50)
-            
-            return df.dropna()
-        else:
-            # Si hay error, lo mostramos en la consola de la app para saber qué es
-            st.sidebar.error(f"Error de API en {symbol}: {res}")
+        if df.empty or len(df) < 50:
             return None
+            
+        # LIMPIEZA DE COLUMNAS (Para evitar el error de Multi-Index)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        df = df.copy()
+        
+        # Indicadores
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['SMA50'] = ta.sma(df['Close'], length=50)
+        
+        # Quitamos los nulos iniciales del SMA50
+        df = df.dropna()
+        
+        return df if not df.empty else None
     except Exception as e:
-        st.sidebar.error(f"Fallo de conexión: {e}")
+        st.sidebar.error(f"Error en {ticker}: {e}")
         return None
 
 # --- INTERFAZ ---
 tz = pytz.timezone('America/Caracas')
-st.title("⚡ Monitor en Vivo (Binance API)")
-st.write(f"Sincronizado con Caracas: {datetime.now(tz).strftime('%I:%M:%S %p')}")
+st.title("🚀 Scalper Pro 5m")
+st.write(f"Sincronizado con Caracas: {datetime.now(tz).strftime('%I:%M %p')}")
 
-# ASEGÚRATE DE QUE ESTÉN EN MAYÚSCULAS Y TERMINEN EN USDT
-activos = {"Bitcoin": "BTCUSDT", "Ethereum": "ETHUSDT"}
+# Lista de activos (Bitcoin y Ethereum para probar ahorita)
+activos = {"Bitcoin": "BTC-USD", "Ethereum": "ETH-USD"}
 
 for nombre, ticker in activos.items():
-    df = obtener_datos_binance(ticker)
+    df = obtener_datos_seguros(ticker)
     
-    # VALIDACIÓN: Solo intentamos leer datos si el DataFrame NO está vacío
-    if df is not None and len(df) > 0:
-        val = df.iloc[-1]
-        precio, rsi, sma50 = val['Close'], val['RSI'], val['SMA50']
+    if df is not None:
+        # Extraemos los valores de forma segura
+        ultimo_precio = float(df['Close'].iloc[-1])
+        ultimo_rsi = float(df['RSI'].iloc[-1])
+        sma50 = float(df['SMA50'].iloc[-1])
         
         st.subheader(f"📊 {nombre}")
         c1, c2, c3 = st.columns(3)
-        c1.metric("Precio", f"${precio:,.2f}")
-        c2.metric("RSI (5m)", f"{rsi:.2f}")
-        c3.metric("Tendencia", "📈 ALCISTA" if precio > sma50 else "📉 BAJISTA")
+        c1.metric("Precio", f"${ultimo_precio:,.2f}")
+        c2.metric("RSI", f"{ultimo_rsi:.2f}")
+        c3.metric("SMA50", "📈 Arriba" if ultimo_precio > sma50 else "📉 Abajo")
 
-        # Gráfico
+        # Gráfico Robusto
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3], vertical_spacing=0.05)
-        fig.add_trace(go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Velas"), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='orange'), name="SMA50"), row=1, col=1)
+        
+        fig.add_trace(go.Candlestick(
+            x=df.index, open=df['Open'], high=df['High'], 
+            low=df['Low'], close=df['Close'], name="Velas"
+        ), row=1, col=1)
+        
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='orange', width=2), name="SMA50"), row=1, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=df['RSI'], line=dict(color='cyan'), name="RSI"), row=2, col=1)
         
         fig.update_layout(height=450, template="plotly_dark", showlegend=False, xaxis_rangeslider_visible=False)
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.error(f"⚠️ No hay datos para {ticker}. Verifica que el nombre sea correcto (ej: BTCUSDT).")
+        st.warning(f"⏳ {nombre}: Esperando datos del mercado...")
